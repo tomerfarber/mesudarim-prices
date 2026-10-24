@@ -1,6 +1,7 @@
 import { CHAINS, chainById } from './chains.ts';
 import { type Session, open } from './engines/index.ts';
 import { newest } from './files.ts';
+import { cityName, loadLocalities } from './localities.ts';
 import { type Targets, inBatches, rpc } from './server.ts';
 import { branches, decode, priceItems } from './xml.ts';
 
@@ -26,12 +27,16 @@ async function withSession<T>(chainId: string, task: (s: Session) => Promise<T>)
  */
 export async function catalog(): Promise<Record<string, unknown>> {
   const report: Record<string, unknown> = {};
+  const localities = await loadLocalities();
   const products = new Map<string, { name: string; manufacturer: string; quantity: number | null; unit: string; weighted: boolean; chains: Set<string> }>();
   for (const chain of CHAINS) {
     try {
       const [branchCount, itemCount] = await withSession(chain.id, async (s) => {
         const storesFile = newest(await s.list('stores', null), 'stores', null);
-        const found = storesFile ? [...branches(decode(await s.fetch(storesFile)))] : [];
+        const found = (storesFile ? [...branches(decode(await s.fetch(storesFile)))] : []).map((b) => ({
+          ...b,
+          city: cityName(localities, b.city, b.name, b.address),
+        }));
         await inBatches(found, 500, (batch) => rpc('ingest_branches', { p_chain: chain.id, p_rows: batch }));
         const files = (await s.list('pricefull', null)).sort((a, b) => b.stamp.localeCompare(a.stamp));
         const picked = [...new Map(files.map((f) => [f.store, f])).values()].slice(0, CATALOG_FILES_PER_CHAIN);

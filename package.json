@@ -1,0 +1,14 @@
+{
+  "name": "mesudarim-prices",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.6" },
+  "scripts": {
+    "prices": "node --experimental-strip-types src/cli.ts prices",
+    "catalog": "node --experimental-strip-types src/cli.ts catalog",
+    "test": "node --experimental-strip-types --test test/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": { "basic-ftp": "^5.0.5" },
+  "devDependencies": { "typescript": "^5.6.0", "@types/node": "^22.0.0" }
+}

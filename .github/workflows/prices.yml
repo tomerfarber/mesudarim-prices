@@ -1,0 +1,55 @@
+name: prices
+
+# Daily: today's prices of the branches and products Mesudarim users track.
+# Weekly: every chain's branches and the national product catalog.
+# Times are UTC; Israel is UTC+2/+3. Victory publishes after ~08:00 Israel
+# time, so the second daily run catches it.
+on:
+  schedule:
+    - cron: '30 4 * * *'
+    - cron: '30 7 * * *'
+    - cron: '0 2 * * 0'
+  workflow_dispatch:
+    inputs:
+      job:
+        description: prices or catalog
+        default: prices
+  push:
+    branches: [main]
+
+concurrency:
+  group: prices
+  cancel-in-progress: false
+
+jobs:
+  test:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+  run:
+    if: github.event_name != 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci --omit=dev
+      - name: Run
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          PRICES_TOKEN: ${{ secrets.PRICES_TOKEN }}
+        run: |
+          job="${{ github.event.inputs.job }}"
+          if [ -z "$job" ]; then
+            if [ "${{ github.event.schedule }}" = "0 2 * * 0" ]; then job=catalog; else job=prices; fi
+          fi
+          node --experimental-strip-types --no-warnings src/cli.ts "$job"

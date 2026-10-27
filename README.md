@@ -7,7 +7,7 @@ Since 2015 every supermarket chain in Israel must publish the prices of every br
 - `src/chains.ts`: the 10 chains, where each publishes, and which ones answer only Israeli addresses.
 - `src/engines/`: one small client per publishing system (Cerberus FTPS, Shufersal, laibcatalog, Bina, PublishPrice, Hazi Hinam). Each lists every branch's files of a kind and downloads them.
 - `src/plan.ts`: what a run sends for each branch, from what is published and what the server has (pure, tested).
-- `src/run.ts`: one run. `src/cli.ts`: flags and the exit code.
+- `src/run.ts`: one run. `src/cli.ts`: the commands and the exit code; `src/args.ts`: the flags, checked before anything runs.
 - `src/relay.ts`, `relay/`: the Israeli relay (below).
 - `src/xml.ts`: decoding (gzip, zip, BOM, UTF-16) and the item and branch readers. `src/localities.ts`: branch cities.
 

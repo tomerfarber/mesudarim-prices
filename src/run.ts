@@ -78,6 +78,11 @@ export interface ChainReport {
   failed?: string[];
   /** Listed branches the server has no row for (e.g. Shufersal lists a few branches missing from its Stores file). */
   unknown?: string[];
+  /**
+   * Branches in the Stores file without a PriceFull (Shufersal's new 550 and 751 on 2026-10-27). The server
+   * keeps such a branch selectable for its grace period although it has no prices; this list says which.
+   */
+  withoutPriceFull?: string[];
   /** Payload sizes of ingest_price_map, in KB. */
   payloadKB?: { max: number; total: number };
   seconds?: number;
@@ -116,9 +121,10 @@ async function priceChain(
   options: RunOptions,
   deadline: number,
   catalog: Map<string, ProductSeen> | null,
-  stores: number,
+  storeIds: readonly string[],
   runProblems: string[],
 ): Promise<ChainReport> {
+  const stores = storeIds.length;
   const started = Date.now();
   const problems: string[] = [];
   const early = israelHour(options.now?.()) < PUBLISHED_BY_HOUR;
@@ -318,6 +324,8 @@ async function priceChain(
     problems.push(`no branch was priced (${plans.length} listed)`);
   }
   if (held.length > 0) problems.push(`the server did not take ${held.length} full files: ${held.slice(0, 5).join(', ')}`);
+  const listedStores = new Set(plans.map((p) => p.store));
+  const withoutPriceFull = plans.length > 0 ? storeIds.filter((s) => !listedStores.has(s)) : [];
   if (stores > 0 && plans.length < stores * MIN_LISTED && !(chain.todayOnly && early)) {
     // A listing that looks cut short leaves the chain usable, but fails the run so someone looks.
     const short = `only ${plans.length} of the ${stores} branches in the Stores file have a PriceFull`;
@@ -342,6 +350,7 @@ async function priceChain(
     downloadedMB: Math.round(bytes / 1e5) / 10,
     failed: failures.length ? failures.slice(0, 20) : undefined,
     unknown: unknown.length && !server.dry ? unknown.slice(0, 50) : undefined,
+    withoutPriceFull: withoutPriceFull.length ? withoutPriceFull.slice(0, 50) : undefined,
     payloadKB: { max: Math.round(maxPayload / 1024), total: Math.round(totalPayload / 1024) },
     seconds: Math.round((Date.now() - started) / 1000),
   };
@@ -384,6 +393,7 @@ export async function prices(options: RunOptions): Promise<RunReport> {
 
   // 1. Sessions and branches, every chain at once.
   const sessions = new Map<string, Session>();
+  const storeIds = new Map<string, string[]>();
   const finish = async (chain: Chain, result: ChainReport) => {
     report.chains[chain.id] = { ...report.chains[chain.id], ...result };
     // Victory before ~05:00 lists nothing: its status (and yesterday's prices) stay as they are.
@@ -423,6 +433,7 @@ export async function prices(options: RunOptions): Promise<RunReport> {
           return;
         }
         report.chains[chain.id] = { status: 'ok', stores: found.length };
+        storeIds.set(chain.id, [...new Set(found.map((b) => b.store))]);
         if (localities) await ingestBranches(chain, found, localities);
       } catch (e) {
         if (e instanceof NeedsRelay) {
@@ -463,7 +474,7 @@ export async function prices(options: RunOptions): Promise<RunReport> {
         const before = report.chains[chain.id];
         let result: ChainReport;
         try {
-          result = await priceChain(chain, sessions.get(chain.id)!, stamps, options, deadline, catalog, before?.stores ?? 0, report.problems);
+          result = await priceChain(chain, sessions.get(chain.id)!, stamps, options, deadline, catalog, storeIds.get(chain.id) ?? [], report.problems);
         } catch (e) {
           result = { status: e instanceof NeedsRelay ? 'needs_relay' : 'down', error: message(e), priced: 0 };
         }

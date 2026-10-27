@@ -79,6 +79,12 @@ const yohananof = fakeSession({
   'PriceFull7290803800003-000-015-20261027-004052.gz': xmlItems([['7290004131074', 'חלב', '7.00']]),
 });
 const victoryBeforeFive = fakeSession({});
+/** Shufersal on 2026-10-27: a new branch (550, 'דן דיל קריית גת') in the Stores file, with no PriceFull yet. */
+const withNewBranch = fakeSession({
+  'Stores7290027600007-000-20261027-020000.gz': storesXml([['1', 'שלי באר שבע', '9000'], ['2', 'אקספרס', '9000'], ['550', 'דן דיל קריית גת', '']]),
+  'PriceFull7290027600007-001-001-20261027-030000.gz': xmlItems([['7290004131074', 'חלב', '7.20']]),
+  'PriceFull7290027600007-001-002-20261027-030000.gz': xmlItems([['7290004131074', 'חלב', '7.50']]),
+});
 
 const sessions: Record<string, (() => Promise<Session>) | undefined> = {
   shufersal: async () => shufersal,
@@ -207,6 +213,11 @@ test('a product is named the same whichever chain finishes first (2026-10-27: th
   assert.equal(finished.at(-1), 'shufersal');
   const rows = calls.find((c) => c.fn === 'ingest_products')!.args.p_rows as { name: string; chains: number }[];
   assert.deepEqual(rows.map((r) => [r.name, r.chains]), [['במבה 80 גרם אסם', 3]]);
+});
+
+test('a full run names the branches of the Stores file that have no PriceFull', async () => {
+  const report = await prices({ full: true, chains: ['shufersal'], budgetMs: 60_000, open: async () => withNewBranch, localities });
+  assert.deepEqual(report.chains.shufersal.withoutPriceFull, ['550']);
 });
 
 test('price_map_stamps entries are matched by chain and store', () => {

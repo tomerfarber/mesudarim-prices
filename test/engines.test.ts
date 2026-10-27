@@ -8,7 +8,7 @@ import { haziLinks, openHaziHinam } from '../src/engines/hazihinam.ts';
 import { listingCache } from '../src/engines/index.ts';
 import { laibFiles, openLaib } from '../src/engines/laib.ts';
 import { openPublishPrice, publishPriceFiles } from '../src/engines/publishprice.ts';
-import { shufersalLinks, shufersalPages } from '../src/engines/shufersal.ts';
+import { linkExpiry, openShufersal, shufersalLinks, shufersalPages } from '../src/engines/shufersal.ts';
 import { network } from '../src/http.ts';
 
 const realFetch = globalThis.fetch;
@@ -156,4 +156,39 @@ test('FTP data connections go only to the host of the verified control connectio
     ({ request: async () => ({ code: 227, message: `227 Entering Passive Mode (${pasv})` }), socket: { remoteAddress: '194.90.26.22' } }) as unknown as Parameters<typeof passiveMode>[0];
   // Another public host in the PASV answer is refused before any connection is made.
   await assert.rejects(passiveMode(ftp('8,8,8,8,4,1')), /PASV returned another host/);
+});
+
+test('Shufersal: an expired or refused blob link is fetched again from one fresh listing', async () => {
+  const now = Date.parse('2026-10-27T10:00:00Z');
+  const blob = (store: string, sig: string, se: string) =>
+    `https://pricesprodpublic.blob.core.windows.net/pricefull/PriceFull7290027600007-001-${store}-20261027-030000.gz?sv=2014-02-14&amp;sr=b&amp;sig=${sig}&amp;se=${encodeURIComponent(se)}&amp;sp=r`;
+  let listings = 0;
+  // Each listing signs its links anew; the first one's links expired at 09:50, later ones last until 10:40.
+  const asked = serve((url) => {
+    if (url.startsWith('https://prices.shufersal.co.il/')) {
+      listings++;
+      const se = listings === 1 ? '2026-10-27T09:50:00Z' : '2026-10-27T10:40:00Z';
+      const stores = listings === 3 ? ['001', '003'] : ['001', '002', '003'];
+      return new Response(stores.map((st) => `<a href="${blob(st, `s${listings}`, se)}">x</a>`).join(''));
+    }
+    // Azure refuses store 3's link of the second listing as if it had expired early.
+    if (url.includes('-003-') && url.includes('sig=s2')) return new Response('<Error><Code>AuthenticationFailed</Code></Error>', { status: 403 });
+    return new Response(new Uint8Array([7]));
+  });
+  const session = await openShufersal(chainById('shufersal'), () => now);
+  const [one, two, three] = (await session.list('pricefull')).sort((a, b) => a.name.localeCompare(b.name));
+  assert.equal(linkExpiry(one.source), Date.parse('2026-10-27T09:50:00Z'));
+
+  // Two expired links fetched at once share one fresh listing.
+  assert.deepEqual(await Promise.all([session.fetch(one), session.fetch(two)]).then((b) => b.map((x) => [...x])), [[7], [7]]);
+  assert.equal(listings, 2);
+  assert.deepEqual(asked.filter((u) => u.includes('blob.core')).map((u) => new URL(u).searchParams.get('sig')), ['s2', 's2']);
+
+  // A refused link: listed once more, and the new link works.
+  assert.deepEqual([...(await session.fetch(three))], [7]);
+  assert.equal(listings, 3);
+  assert.equal(new URL(asked.at(-1)!).searchParams.get('sig'), 's3');
+  // A file that a newer one replaced in the meantime is an error, not a silent skip.
+  await assert.rejects(session.fetch({ ...two, source: two.source }), /no longer listed/);
+  assert.equal(listings, 3);
 });

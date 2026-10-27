@@ -1,8 +1,8 @@
 import { type PeerCertificate, checkServerIdentity } from 'node:tls';
 import { Writable } from 'node:stream';
-import { Client } from 'basic-ftp';
+import { Client, type FTPContext, type FTPResponse } from 'basic-ftp';
 // Not re-exported by the package index; basic-ftp is pinned (package.json), so the path is stable.
-import { enterPassiveModeIPv4_forceControlHostIP } from 'basic-ftp/dist/transfer.js';
+import { connectForPassiveTransfer, parsePasvResponse } from 'basic-ftp/dist/transfer.js';
 import type { Chain } from '../chains.ts';
 import { type PublishedFile, parseName } from '../files.ts';
 import { limiter } from '../pool.ts';
@@ -20,12 +20,40 @@ import { listingCache, type Session } from './index.ts';
  * domain instead of the host name; anything else is refused.
  *
  * EPSV data connections never open on this server (each attempt waits for the
- * timeout), so transfers go straight to PASV. The data connection must go to
- * the host of the verified control connection: a PASV answer that names
- * another host is refused (basic-ftp's safe default, which plain
- * enterPassiveModeIPv4 would turn off).
+ * timeout), so transfers go straight to PASV. PASV names another address than
+ * the control connection's (control 194.90.26.22, data 194.90.26.21, measured
+ * 2026-10-27; the data port does not answer on .22), so basic-ftp's default of
+ * refusing any other host cannot be used. passiveMode accepts the control
+ * host or another public address of the same /24, and nothing else; the data
+ * connection is TLS with the same verified certificate rules and the control
+ * connection's session.
  */
-export const passiveMode = enterPassiveModeIPv4_forceControlHostIP;
+const octets = (ip: string) => (/^\d{1,3}(\.\d{1,3}){3}$/.test(ip) ? ip.split('.').map(Number) : null);
+const isPrivate = (ip: number[]) => ip[0] === 10 || ip[0] === 127 || (ip[0] === 172 && ip[1] >= 16 && ip[1] <= 31) || (ip[0] === 192 && ip[1] === 168);
+
+/** Where a PASV answer's data connection goes; throws for a host that is not the FTP server's. */
+export function dataHost(pasvHost: string, controlHost: string): string {
+  const control = controlHost.replace(/^::ffff:/i, '');
+  const pasv = octets(pasvHost);
+  const ctl = octets(control);
+  if (pasvHost === control) return control;
+  if (pasv && ctl && !isPrivate(ctl)) {
+    // A private address behind NAT means the server itself.
+    if (isPrivate(pasv)) return control;
+    if (pasv[0] === ctl[0] && pasv[1] === ctl[1] && pasv[2] === ctl[2]) return pasvHost;
+  }
+  throw new Error(`PASV named ${pasvHost}, which is not the FTP server (${control}): refused`);
+}
+
+export async function passiveMode(ftp: FTPContext): Promise<FTPResponse> {
+  const res = await ftp.request('PASV');
+  const target = parsePasvResponse(res.message);
+  if (!target) throw new Error(`cannot read the PASV answer: ${res.message}`);
+  const control = ftp.socket.remoteAddress;
+  if (!control) throw new Error('the FTP control connection is closed');
+  await connectForPassiveTransfer(dataHost(target.host, control), target.port, ftp);
+  return res;
+}
 
 export const HOST = 'url.retail.publishedprices.co.il';
 const DOMAIN = 'publishedprices.co.il';

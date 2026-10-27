@@ -3,7 +3,7 @@ import { afterEach, test } from 'node:test';
 import type { PeerCertificate } from 'node:tls';
 import { CHAINS, chainById } from '../src/chains.ts';
 import { binaFiles } from '../src/engines/bina.ts';
-import { passiveMode, publishedPricesIdentity } from '../src/engines/cerberus.ts';
+import { dataHost, passiveMode, publishedPricesIdentity } from '../src/engines/cerberus.ts';
 import { haziLinks, openHaziHinam } from '../src/engines/hazihinam.ts';
 import { listingCache } from '../src/engines/index.ts';
 import { laibFiles, openLaib } from '../src/engines/laib.ts';
@@ -151,11 +151,17 @@ test('the FTP certificate must be issued to publishedprices.co.il (P56)', () => 
   assert.ok(publishedPricesIdentity('evil.com', cert('DNS:*.publishedprices.co.il')) instanceof Error);
 });
 
-test('FTP data connections go only to the host of the verified control connection', async () => {
+test('FTP data connections go only to the FTP server: its own address or a neighbour in its /24', async () => {
+  // The real server: control on .22, PASV names .21 (2026-10-27).
+  assert.equal(dataHost('194.90.26.21', '194.90.26.22'), '194.90.26.21');
+  assert.equal(dataHost('194.90.26.22', '::ffff:194.90.26.22'), '194.90.26.22');
+  assert.equal(dataHost('10.0.0.5', '194.90.26.22'), '194.90.26.22');
+  assert.throws(() => dataHost('8.8.8.8', '194.90.26.22'), /not the FTP server/);
+  assert.throws(() => dataHost('194.90.27.21', '194.90.26.22'), /not the FTP server/);
   const ftp = (pasv: string) =>
     ({ request: async () => ({ code: 227, message: `227 Entering Passive Mode (${pasv})` }), socket: { remoteAddress: '194.90.26.22' } }) as unknown as Parameters<typeof passiveMode>[0];
-  // Another public host in the PASV answer is refused before any connection is made.
-  await assert.rejects(passiveMode(ftp('8,8,8,8,4,1')), /PASV returned another host/);
+  // Another host in the PASV answer is refused before any connection is made.
+  await assert.rejects(passiveMode(ftp('8,8,8,8,4,1')), /not the FTP server/);
 });
 
 test('Shufersal: an expired or refused blob link is fetched again from one fresh listing', async () => {

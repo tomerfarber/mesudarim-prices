@@ -34,12 +34,6 @@ export interface Chain {
   /** Files downloaded at once (FTP: connections). */
   concurrency: number;
   /**
-   * The chain's `Price` files are complete price lists, not changes (Victory:
-   * every hourly Price file has every item of the PriceFull, measured
-   * 2026-10-27), so the newest one replaces the map like a PriceFull.
-   */
-  priceIsFull?: boolean;
-  /**
    * The listing shows only today's files (Victory's laibcatalog API has no
    * date parameter), so it is empty from midnight until the chain's first
    * files (~05:00 Israel time). An empty listing before 09:00 is not a failure.
@@ -57,7 +51,6 @@ export const CHAINS: readonly Chain[] = [
     engine: { kind: 'laib' },
     relay: 'all',
     concurrency: 4,
-    priceIsFull: true,
     todayOnly: true,
   },
   { id: 'yohananof', name: 'יוחננוף', codes: ['7290803800003'], engine: { kind: 'cerberus', user: 'yohananof' }, relay: 'none', concurrency: 2 },

@@ -42,15 +42,15 @@ test('change files newer than the map are applied oldest first; older ones are s
   assert.deepEqual(byStore['2'].deltas.map((d) => d.stamp), ['20261027110000']);
 });
 
-test("Victory: the newest Price file is a complete list and replaces the map like a PriceFull", () => {
+test("Victory: its hourly Price files are merged as changes on top of the PriceFull, like every chain's", () => {
   const fulls = [f('PriceFull7290696200003-001-001-20261027-051238.gz')];
-  const changes = [f('Price7290696200003-001-001-20261027-060723.gz'), f('Price7290696200003-001-001-20261027-110917.gz')];
-  const [plan] = planChain(fulls, changes, stamps({ '1': { file: '20261027051238', delta: null } }), { readAll: false, priceIsFull: true });
-  assert.equal(plan.full.name, 'Price7290696200003-001-001-20261027-110917.gz');
+  const changes = [f('Price7290696200003-001-001-20261027-110917.gz'), f('Price7290696200003-001-001-20261027-060723.gz')];
+  const [plan] = planChain(fulls, changes, stamps({ '1': { file: '20261026051001', delta: '20261026200000' } }), { readAll: false });
+  assert.equal(plan.full.name, 'PriceFull7290696200003-001-001-20261027-051238.gz');
   assert.equal(plan.sendFull, true);
-  assert.deepEqual(plan.deltas, []);
+  assert.deepEqual(plan.deltas.map((d) => d.stamp), ['20261027060723', '20261027110917']);
   // Before 05:00 only yesterday's map exists and nothing is listed: nothing to do.
-  assert.deepEqual(planChain([], [], stamps({}), { readAll: true, priceIsFull: true }), []);
+  assert.deepEqual(planChain([], [], stamps({}), { readAll: true }), []);
 });
 
 test('merging change files stops at the first one that failed, so no change is skipped for good', () => {

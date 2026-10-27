@@ -15,7 +15,12 @@ export interface Stamp {
 
 export interface StorePlan {
   store: string;
-  /** The newest complete price list of the branch (a PriceFull, or for some chains a Price file). */
+  /**
+   * The newest PriceFull of the branch. Price files are always merged as
+   * changes, even where they happen to be complete lists (Victory's were, on
+   * the day it was measured): merging a complete list gives the same map, and
+   * a change-only file is never taken for the whole list.
+   */
   full: PublishedFile;
   /** Send `full` with p_full = true: it is newer than the server's map, or there is no map. */
   sendFull: boolean;
@@ -31,11 +36,10 @@ export function planChain(
   fulls: readonly PublishedFile[],
   prices: readonly PublishedFile[],
   stamps: (store: string) => Stamp | undefined,
-  { readAll, priceIsFull = false }: { readAll: boolean; priceIsFull?: boolean },
+  { readAll }: { readAll: boolean },
 ): StorePlan[] {
-  // A chain whose Price files are complete lists: the newest of either kind is the branch's full list.
-  const newestFull = newestByStore(priceIsFull ? [...fulls, ...prices] : fulls);
-  const deltasByStore = priceIsFull ? new Map<string, PublishedFile[]>() : Map.groupBy(prices.filter((f) => f.store !== null), (f) => f.store!);
+  const newestFull = newestByStore(fulls);
+  const deltasByStore = Map.groupBy(prices.filter((f) => f.store !== null), (f) => f.store!);
   const plans: StorePlan[] = [];
   for (const [store, full] of newestFull) {
     const stamp = stamps(store);

@@ -18,6 +18,8 @@ interface Record {
 
 export interface Localities {
   byCode: Map<string, string>;
+  /** The government list loaded. Without it a coded city is sent as '' (the server keeps the city it has), never guessed. */
+  codes: boolean;
   /** Searchable spellings (normalized) and the city each one means; longest first, so "קריית ים" wins over "ים". */
   names: [string, string][];
 }
@@ -58,7 +60,7 @@ export function buildLocalities(records: readonly { code: string; name: string }
     const key = searchable(alias);
     if (key && !names.has(key)) names.set(key, city);
   }
-  return { byCode, names: [...names].sort((a, b) => b[0].length - a[0].length) };
+  return { byCode, codes: byCode.size > 0, names: [...names].sort((a, b) => b[0].length - a[0].length) };
 }
 
 export async function loadLocalities(): Promise<Localities> {
@@ -80,6 +82,7 @@ export function cityName(localities: Localities, city: string, name: string, add
     const code = String(Number(trimmed));
     const known = CHAIN_CITY_CODES[chainId]?.[code] ?? localities.byCode.get(code);
     if (known) return known;
+    if (!localities.codes) return '';
   } else if (trimmed && !/^\d+$/.test(trimmed) && !/^unknown$/i.test(trimmed)) {
     return clean(trimmed);
   }

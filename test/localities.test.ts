@@ -62,3 +62,12 @@ test('nicknames and abbreviations in names', () => {
   assert.equal(city('', 'צמח', 'צומת צמח מול כנרת'), 'צמח');
   assert.equal(city('', 'BE פרישמן ת"א', 'דיזינגוף 102'), 'תל אביב-יפו');
 });
+
+test('without the government list a coded city is left empty (the server keeps the one it has); names and known spellings still work', () => {
+  const none = buildLocalities([]);
+  assert.equal(none.codes, false);
+  assert.equal(cityName(none, '9000', 'רגר באר שבע', ''), '');
+  assert.equal(cityName(none, '10044', 'BE אפרת', '', 'shufersal'), 'אפרת');
+  assert.equal(cityName(none, 'באר שבע', 'x', ''), 'באר שבע');
+  assert.equal(cityName(none, '', 'שלי תל אביב', ''), 'תל אביב-יפו');
+});

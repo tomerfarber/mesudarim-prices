@@ -2,24 +2,27 @@ name: prices
 
 # Prices of every branch of every chain, for Mesudarim (docs/PRICES-CONTRACT.md
 # in the app's repository).
-# - Daily full run (02:30 UTC): branches, every branch's newest PriceFull, and
-#   the product catalog.
+# - Daily full run (03:30 UTC: 05:30 in Israel in winter, 06:30 in summer):
+#   branches, every branch's newest PriceFull, and the product catalog. Not
+#   earlier: Victory publishes only from ~05:00 Israel time, and a full run
+#   before that would leave its products out of the catalog all winter.
 # - Update runs every 3 hours during the day (05:30-20:30 UTC): newer
-#   PriceFull and Price (change) files only, so prices stay fresher than the
-#   apps' 6-hour note. Victory publishes only after ~05:00 Israel time, so the
-#   first update run picks it up. Each update rewrites a few hundred branch
-#   maps, so they are not more frequent.
+#   PriceFull and Price (change) files only. Each update rewrites a few
+#   hundred branch maps, so they are not more frequent.
 # - Monthly keepalive: GitHub disables the schedule of a public repository
-#   after 60 days without activity.
+#   after 60 days without activity (not a documented guarantee; the
+#   database's prices_stale alert is the backstop).
 # - A push to main that changes this file runs the downloader once.
 # Carrefour, Hazi Hinam and Victory answer only Israeli addresses: they go
 # through the relay (relay/template.yaml) once the repository variables
 # RELAY_URL and RELAY_ROLE_ARN are set; until then they are reported as
-# needs_relay, which does not fail the run. Any chain that is down fails the
-# run (red, and GitHub emails the owner).
+# needs_relay, which does not fail the run. If the AWS step fails, only those
+# three chains are down; the other chains still run. Any chain that is down,
+# or a run that could not write, fails the run (red, and GitHub emails the
+# owner).
 on:
   schedule:
-    - cron: '30 2 * * *'
+    - cron: '30 3 * * *'
     - cron: '30 5,8,11,14,17,20 * * *'
     - cron: '17 6 1 * *'
   workflow_dispatch:
@@ -74,6 +77,10 @@ jobs:
       - run: npm ci --omit=dev
       - name: Credentials for the Israeli relay
         if: vars.RELAY_ROLE_ARN != ''
+        # A failure here must not stop the other chains: without credentials the
+        # downloader reports Carrefour, Hazi Hinam and Victory down, runs the
+        # rest, and the run still turns red.
+        continue-on-error: true
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.RELAY_ROLE_ARN }}
@@ -90,7 +97,7 @@ jobs:
           JOB: ${{ inputs.job }}
         run: |
           mode=update
-          if [ "$SCHEDULE" = "30 2 * * *" ] || [ "$JOB" = "full" ] || [ "$EVENT" = "push" ]; then mode=full; fi
+          if [ "$SCHEDULE" = "30 3 * * *" ] || [ "$JOB" = "full" ] || [ "$EVENT" = "push" ]; then mode=full; fi
           flag=""
           if [ "$mode" = "full" ]; then flag="--full"; fi
           node --experimental-strip-types --no-warnings src/cli.ts prices $flag --minutes 105

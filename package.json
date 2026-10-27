@@ -7,7 +7,9 @@
   },
   "scripts": {
     "prices": "node --experimental-strip-types src/cli.ts prices",
-    "catalog": "node --experimental-strip-types src/cli.ts catalog",
+    "prices:full": "node --experimental-strip-types src/cli.ts prices --full",
+    "dry": "node --experimental-strip-types src/cli.ts prices --full --dry --direct",
+    "probe": "node --experimental-strip-types src/cli.ts probe",
     "test": "node --experimental-strip-types --test test/*.test.ts",
     "typecheck": "tsc --noEmit"
   },

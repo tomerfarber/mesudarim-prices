@@ -1,22 +1,37 @@
 name: prices
 
-# Daily: today's prices of the branches and products Mesudarim users track.
-# Weekly: every chain's branches and the national product catalog.
-# Times are UTC; Israel is UTC+2/+3. Victory publishes after ~08:00 Israel
-# time, so the second daily run catches it.
+# Prices of every branch of every chain, for Mesudarim (docs/PRICES-CONTRACT.md
+# in the app's repository).
+# - Daily full run (02:30 UTC): branches, every branch's newest PriceFull, and
+#   the product catalog.
+# - Update runs every 2 hours during the day: newer PriceFull and Price
+#   (change) files only, so prices stay fresh. Victory publishes only after
+#   ~05:00 Israel time, so the first update run picks it up.
+# - Monthly keepalive: GitHub disables the schedule of a public repository
+#   after 60 days without activity.
+# - A push to main that changes this file runs the downloader once.
+# Carrefour, Hazi Hinam and Victory answer only Israeli addresses: they go
+# through the relay (relay/template.yaml) once the repository variables
+# RELAY_URL and RELAY_ROLE_ARN are set; until then they are reported as
+# needs_relay, which does not fail the run. Any chain that is down fails the
+# run (red, and GitHub emails the owner).
 on:
   schedule:
-    - cron: '30 4 * * *'
-    - cron: '30 7 * * *'
-    - cron: '30 13 * * *'
-    - cron: '0 2 * * 0'
+    - cron: '30 2 * * *'
+    - cron: '30 4,6,8,10,12,14,16,18,20 * * *'
+    - cron: '17 6 1 * *'
   workflow_dispatch:
     inputs:
       job:
-        description: prices or catalog
-        default: prices
+        description: full (branches, every PriceFull, products) or update (newer files only)
+        type: choice
+        options: [update, full]
+        default: update
   push:
     branches: [main]
+
+permissions:
+  contents: read
 
 concurrency:
   group: prices
@@ -26,6 +41,7 @@ jobs:
   test:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -35,22 +51,56 @@ jobs:
       - run: npm test
 
   run:
-    if: github.event_name != 'push'
+    needs: test
+    if: >-
+      !failure() && !cancelled() && (
+        (github.event_name == 'schedule' && github.event.schedule != '17 6 1 * *') ||
+        github.event_name == 'workflow_dispatch' ||
+        (github.event_name == 'push' && (
+          contains(toJSON(github.event.commits.*.modified), '.github/workflows/prices.yml') ||
+          contains(toJSON(github.event.commits.*.added), '.github/workflows/prices.yml')))
+      )
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm }
       - run: npm ci --omit=dev
+      - name: Credentials for the Israeli relay
+        if: vars.RELAY_ROLE_ARN != ''
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.RELAY_ROLE_ARN }}
+          aws-region: il-central-1
+          role-duration-seconds: 7200
       - name: Run
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
           PRICES_TOKEN: ${{ secrets.PRICES_TOKEN }}
+          RELAY_URL: ${{ vars.RELAY_URL }}
+          EVENT: ${{ github.event_name }}
+          SCHEDULE: ${{ github.event.schedule }}
+          JOB: ${{ inputs.job }}
         run: |
-          job="${{ github.event.inputs.job }}"
-          if [ -z "$job" ]; then
-            if [ "${{ github.event.schedule }}" = "0 2 * * 0" ]; then job=catalog; else job=prices; fi
-          fi
-          node --experimental-strip-types --no-warnings src/cli.ts "$job"
+          mode=update
+          if [ "$SCHEDULE" = "30 2 * * *" ] || [ "$JOB" = "full" ] || [ "$EVENT" = "push" ]; then mode=full; fi
+          flag=""
+          if [ "$mode" = "full" ]; then flag="--full"; fi
+          node --experimental-strip-types --no-warnings src/cli.ts prices $flag --minutes 105
+
+  keepalive:
+    if: github.event_name == 'schedule' && github.event.schedule == '17 6 1 * *'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Keep the schedule enabled
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api --method PUT "repos/${{ github.repository }}/actions/workflows/prices.yml/enable"

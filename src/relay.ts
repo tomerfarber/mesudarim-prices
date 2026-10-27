@@ -18,7 +18,7 @@ export function relayFromEnv(env: NodeJS.ProcessEnv = process.env): Relay | null
   const accessKeyId = env.AWS_ACCESS_KEY_ID;
   const secretAccessKey = env.AWS_SECRET_ACCESS_KEY;
   if (!accessKeyId || !secretAccessKey) {
-    throw new Error('RELAY_URL is set but there are no AWS credentials (aws-actions/configure-aws-credentials did not run)');
+    throw new Error('RELAY_URL is set but there are no AWS credentials (the AWS step of the workflow failed, or RELAY_ROLE_ARN is not set)');
   }
   const aws = new AwsClient({
     accessKeyId,
@@ -41,4 +41,17 @@ export function relayFromEnv(env: NodeJS.ProcessEnv = process.env): Relay | null
       });
     },
   };
+}
+
+/**
+ * The relay for this run, or why it cannot be used. A broken setup never stops
+ * the run: the relay chains are reported down with this reason, and the other
+ * chains run as usual.
+ */
+export function relaySetup(env: NodeJS.ProcessEnv = process.env): { relay: Relay | null; problem: string | null } {
+  try {
+    return { relay: relayFromEnv(env), problem: null };
+  } catch (e) {
+    return { relay: null, problem: e instanceof Error ? e.message : String(e) };
+  }
 }

@@ -12,6 +12,19 @@ export class NeedsRelay extends Error {
   }
 }
 
+/**
+ * The relay itself failed, not the chain behind it: AWS refused or throttled
+ * the call (IAM, Function URL, Lambda errors), the relay refused the URL, or
+ * the relay is set up wrong. Its answers carry no x-relay-status header,
+ * which the relay adds only to what a chain's site answered.
+ */
+export class RelayError extends Error {
+  constructor(message: string) {
+    super(`relay: ${message}`);
+    this.name = 'RelayError';
+  }
+}
+
 /** A non-2xx answer, kept apart from network errors so callers can tell them apart (P12). */
 export class HttpError extends Error {
   status: number;
@@ -27,8 +40,17 @@ export class HttpError extends Error {
 /**
  * How this process reaches the Israeli-only hosts: through the relay, or
  * directly when it runs in Israel (`--direct`, e.g. a local dry run).
+ * `relayProblem` says why a configured relay cannot be used (relay.ts
+ * relaySetup): the relay chains are then down, and the other chains still run.
  */
-export const network: { relay: Relay | null; direct: boolean } = { relay: null, direct: false };
+export const network: { relay: Relay | null; direct: boolean; relayProblem: string | null } = { relay: null, direct: false, relayProblem: null };
+
+/** How a chain that answers only Israeli addresses is reached in this run. */
+export function relayState(): 'direct' | 'ready' | 'missing' | 'broken' {
+  if (network.direct) return 'direct';
+  if (network.relay) return 'ready';
+  return network.relayProblem ? 'broken' : 'missing';
+}
 
 export interface GetOptions {
   timeoutMs?: number;
@@ -39,14 +61,12 @@ export interface GetOptions {
   accept?: readonly number[];
 }
 
-export const canReach = (viaRelay: boolean) => !viaRelay || network.direct || network.relay !== null;
-
 export async function get(url: string, { timeoutMs = 60_000, tries = 3, viaRelay = false, accept = [] }: GetOptions = {}): Promise<Response> {
   const host = new URL(url).host;
   const relayed = viaRelay && !network.direct;
   if (relayed) {
     if (!RELAY_HOSTS.includes(host)) throw new Error(`${host} is not on the relay's allow-list`);
-    if (!network.relay) throw new NeedsRelay(host);
+    if (!network.relay) throw network.relayProblem ? new RelayError(network.relayProblem) : new NeedsRelay(host);
   }
   let last: unknown;
   for (let attempt = 1; attempt <= tries; attempt++) {
@@ -55,8 +75,11 @@ export async function get(url: string, { timeoutMs = 60_000, tries = 3, viaRelay
       const res = relayed
         ? await network.relay!.fetch(url, signal)
         : await fetch(url, { headers: { 'user-agent': UA }, signal, redirect: 'follow' });
-      if (res.ok || accept.includes(res.status)) return res;
-      last = new HttpError(res.status, url, (await res.text().catch(() => '')).slice(0, 300));
+      // Through the relay, an answer without x-relay-status came from AWS or the relay, not from the chain.
+      const relayFault = relayed && !res.ok && !res.headers.has('x-relay-status');
+      if (!relayFault && (res.ok || accept.includes(res.status))) return res;
+      const body = (await res.text().catch(() => '')).slice(0, 300);
+      last = relayFault ? new RelayError(`${res.status} ${body.slice(0, 200)}`) : new HttpError(res.status, url, body);
       if (res.status < 500 && res.status !== 429) break;
     } catch (e) {
       last = e;

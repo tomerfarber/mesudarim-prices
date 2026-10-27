@@ -1,15 +1,19 @@
 import { CHAINS } from './chains.ts';
 import { open } from './engines/index.ts';
 import { newest, newestByStore } from './files.ts';
-import { canReach } from './http.ts';
+import { network, relayState } from './http.ts';
 import { branches, decode, priceItems } from './xml.ts';
 
 /** Checks every chain end to end: its Stores file, its PriceFull listing, then one branch's newest PriceFull. Needs no server. */
 export async function probe(only?: string): Promise<void> {
   for (const chain of CHAINS.filter((c) => !only || c.id === only)) {
     const t = Date.now();
-    if (chain.relay !== 'none' && !canReach(true)) {
+    if (chain.relay !== 'none' && relayState() === 'missing') {
       console.log(`${chain.id.padEnd(11)} needs_relay (set RELAY_URL, or pass --direct in Israel)`);
+      continue;
+    }
+    if (chain.relay !== 'none' && relayState() === 'broken') {
+      console.log(`${chain.id.padEnd(11)} FAIL relay: ${network.relayProblem}`);
       continue;
     }
     let session;

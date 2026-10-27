@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict';
 import { afterEach, test } from 'node:test';
-import { HttpError, NeedsRelay, get, network } from '../src/http.ts';
-import { relayFromEnv } from '../src/relay.ts';
+import { HttpError, NeedsRelay, RelayError, get, network, relayState } from '../src/http.ts';
+import { relayFromEnv, relaySetup } from '../src/relay.ts';
 
 const realFetch = globalThis.fetch;
 afterEach(() => {
   globalThis.fetch = realFetch;
   network.direct = false;
   network.relay = null;
+  network.relayProblem = null;
 });
 
 test('a relayed host without a relay is NeedsRelay; in Israel (--direct) it is fetched directly', async () => {
@@ -66,4 +67,31 @@ test('relay requests are SigV4-signed for lambda in il-central-1 with the OIDC s
   assert.match(auth, /^AWS4-HMAC-SHA256 Credential=ASIAEXAMPLE\/\d{8}\/il-central-1\/lambda\/aws4_request, SignedHeaders=[^,]*host[^,]*, Signature=[0-9a-f]{64}$/);
   assert.equal(req.headers.get('x-amz-security-token'), 'session-token');
   assert.match(req.headers.get('x-amz-content-sha256') ?? '', /^[0-9a-f]{64}$/);
+});
+
+test("the relay's own failures read as relay errors; a chain's answer through the relay stays the chain's", async () => {
+  let answer = () => new Response('{"Message":"Forbidden"}', { status: 403 });
+  network.relay = { fetch: async () => answer() };
+  // AWS refused the call (IAM, Function URL): no x-relay-status.
+  await assert.rejects(get('https://prices.carrefour.co.il/', { viaRelay: true }), (e: unknown) => e instanceof RelayError && /^relay: 403/.test(e.message));
+  // The relay refused or could not reach the URL, even for a status the caller accepts (laibcatalog's 400).
+  answer = () => new Response('{"error":"body must be {\\"url\\": ...}"}', { status: 400 });
+  await assert.rejects(get('https://laibcatalog.co.il/webapi/api/getfiles?edi=1', { viaRelay: true, accept: [400] }), RelayError);
+  // Carrefour itself answered 403, through the relay.
+  answer = () => new Response('blocked', { status: 403, headers: { 'x-relay-status': '403' } });
+  await assert.rejects(get('https://prices.carrefour.co.il/', { viaRelay: true }), (e: unknown) => e instanceof HttpError && /^403 prices\.carrefour\.co\.il/.test(e.message));
+  answer = () => new Response('{"message":"FilesRootPath is invalid"}', { status: 400, headers: { 'x-relay-status': '400' } });
+  assert.equal((await get('https://laibcatalog.co.il/webapi/api/getfiles?edi=1', { viaRelay: true, accept: [400] })).status, 400);
+});
+
+test('a relay that is set up wrong is a reason, not a crash: the relay chains fail, the others run', async () => {
+  assert.deepEqual(relaySetup({}), { relay: null, problem: null });
+  const broken = relaySetup({ RELAY_URL: 'https://abc.lambda-url.il-central-1.on.aws/' });
+  assert.equal(broken.relay, null);
+  assert.match(broken.problem!, /no AWS credentials/);
+  network.relayProblem = broken.problem;
+  assert.equal(relayState(), 'broken');
+  await assert.rejects(get('https://prices.carrefour.co.il/', { viaRelay: true }), (e: unknown) => e instanceof RelayError && /no AWS credentials/.test(e.message));
+  network.direct = true;
+  assert.equal(relayState(), 'direct');
 });

@@ -1,0 +1,189 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Mesudarim price relay. Carrefour, Hazi Hinam and Victory publish their price
+  files only to Israeli addresses; this Lambda in il-central-1 (Tel Aviv)
+  fetches them for the mesudarim-prices GitHub workflow. Only that repository's
+  default branch can call it (GitHub OIDC, no stored keys), only through its
+  Function URL (AWS_IAM auth, SigV4), and it reaches only the three hosts in
+  its code.
+
+Parameters:
+  GitHubRepository:
+    Type: String
+    Default: tomerfarber/mesudarim-prices
+    Description: The only repository allowed to use the relay (owner/name).
+  GitHubBranch:
+    Type: String
+    Default: main
+    Description: The repository's default branch; runs from other branches cannot use the relay.
+  CreateGitHubProvider:
+    Type: String
+    Default: 'yes'
+    AllowedValues: ['yes', 'no']
+    Description: Choose no only if this AWS account already has the token.actions.githubusercontent.com identity provider.
+
+Conditions:
+  CreateProvider: !Equals [!Ref CreateGitHubProvider, 'yes']
+
+Resources:
+  GitHubProvider:
+    Type: AWS::IAM::OIDCProvider
+    Condition: CreateProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList: [sts.amazonaws.com]
+      ThumbprintList:
+        - 6938fd4d98bab03faadb97b34396831e3780aea1
+        - 1c58a3a8518e8759bf075b76b750d4f2df264fcd
+
+  RelayLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/mesudarim-price-relay
+      RetentionInDays: 7
+
+  RelayExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: write-own-logs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !GetAtt RelayLogs.Arn
+
+  RelayFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: RelayLogs
+    Properties:
+      FunctionName: mesudarim-price-relay
+      Description: Fetches Israeli-only price pages and files for mesudarim-prices.
+      Runtime: nodejs22.x
+      Architectures: [arm64]
+      Handler: index.handler
+      MemorySize: 512
+      Timeout: 60
+      Role: !GetAtt RelayExecutionRole.Arn
+      Code:
+        # The same code as relay/index.cjs in the repository (a test keeps them equal).
+        ZipFile: |
+          'use strict';
+          // Mesudarim price relay: fetches one public price page or file from a chain
+          // that answers only Israeli addresses. Only the hosts below, only https GET.
+          const HOSTS = new Set(['prices.carrefour.co.il', 'shop.hazi-hinam.co.il', 'laibcatalog.co.il']);
+          // The answer is base64 (x4/3) and a Function URL answer is at most 6 MB.
+          const MAX = 4 * 1024 * 1024;
+          const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36';
+          const json = (statusCode, error) => ({ statusCode, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ error }) });
+          const allowed = (u) => u.protocol === 'https:' && !u.port && !u.username && !u.password && HOSTS.has(u.hostname);
+
+          async function read(res) {
+            if (Number(res.headers.get('content-length') || 0) > MAX) return null;
+            const parts = [];
+            let size = 0;
+            for await (const part of res.body || []) {
+              size += part.length;
+              if (size > MAX) return null;
+              parts.push(part);
+            }
+            return Buffer.concat(parts);
+          }
+
+          exports.handler = async (event) => {
+            const t = Date.now();
+            if ((event.requestContext && event.requestContext.http && event.requestContext.http.method) !== 'POST') return json(405, 'POST only');
+            let url;
+            try {
+              const raw = event.isBase64Encoded ? Buffer.from(event.body || '', 'base64').toString() : event.body || '';
+              url = new URL(JSON.parse(raw).url);
+            } catch {
+              return json(400, 'body must be {"url": "https://..."}');
+            }
+            for (let hop = 0; hop < 4; hop++) {
+              if (!allowed(url)) return json(403, 'host not allowed');
+              let res;
+              try {
+                res = await fetch(url, { headers: { 'user-agent': UA }, redirect: 'manual', signal: AbortSignal.timeout(50000) });
+              } catch (e) {
+                console.log(JSON.stringify({ host: url.hostname, error: String(e && e.name), ms: Date.now() - t }));
+                return json(502, 'upstream unreachable');
+              }
+              const next = res.status >= 300 && res.status < 400 && res.headers.get('location');
+              if (next) {
+                url = new URL(next, url);
+                continue;
+              }
+              const body = await read(res);
+              console.log(JSON.stringify({ host: url.hostname, status: res.status, bytes: body ? body.length : -1, ms: Date.now() - t }));
+              if (!body) return json(413, 'too large for the relay');
+              return {
+                statusCode: res.status,
+                headers: { 'content-type': res.headers.get('content-type') || 'application/octet-stream', 'x-relay-status': String(res.status) },
+                body: body.toString('base64'),
+                isBase64Encoded: true,
+              };
+            }
+            return json(508, 'too many redirects');
+          };
+
+  RelayUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      TargetFunctionArn: !GetAtt RelayFunction.Arn
+      AuthType: AWS_IAM
+      InvokeMode: BUFFERED
+
+  GitHubRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Assumed by the mesudarim-prices workflow (GitHub OIDC) to call the price relay.
+      MaxSessionDuration: 7200
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !If
+                - CreateProvider
+                - !Ref GitHubProvider
+                - !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com'
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                token.actions.githubusercontent.com:sub: !Sub 'repo:${GitHubRepository}:ref:refs/heads/${GitHubBranch}'
+      Policies:
+        - PolicyName: call-the-relay-url-only
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunctionUrl
+                Resource: !GetAtt RelayFunction.Arn
+                Condition:
+                  StringEquals:
+                    lambda:FunctionUrlAuthType: AWS_IAM
+              # Since October 2025 a new Function URL also needs lambda:InvokeFunction;
+              # the condition limits it to calls made through the URL.
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt RelayFunction.Arn
+                Condition:
+                  Bool:
+                    lambda:InvokedViaFunctionUrl: 'true'
+
+Outputs:
+  FunctionUrl:
+    Description: RELAY_URL (a repository variable of mesudarim-prices)
+    Value: !GetAtt RelayUrl.FunctionUrl
+  RoleArn:
+    Description: RELAY_ROLE_ARN (a repository variable of mesudarim-prices)
+    Value: !GetAtt GitHubRole.Arn

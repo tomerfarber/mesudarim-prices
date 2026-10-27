@@ -3,7 +3,7 @@ import { afterEach, test } from 'node:test';
 import type { PeerCertificate } from 'node:tls';
 import { CHAINS, chainById } from '../src/chains.ts';
 import { binaFiles } from '../src/engines/bina.ts';
-import { publishedPricesIdentity } from '../src/engines/cerberus.ts';
+import { passiveMode, publishedPricesIdentity } from '../src/engines/cerberus.ts';
 import { haziLinks, openHaziHinam } from '../src/engines/hazihinam.ts';
 import { listingCache } from '../src/engines/index.ts';
 import { laibFiles, openLaib } from '../src/engines/laib.ts';
@@ -149,4 +149,11 @@ test('the FTP certificate must be issued to publishedprices.co.il (P56)', () => 
   assert.ok(publishedPricesIdentity(host, cert('DNS:*.example.com')) instanceof Error);
   assert.ok(publishedPricesIdentity(host, cert('DNS:*.publishedprices.co.il.evil.com')) instanceof Error);
   assert.ok(publishedPricesIdentity('evil.com', cert('DNS:*.publishedprices.co.il')) instanceof Error);
+});
+
+test('FTP data connections go only to the host of the verified control connection', async () => {
+  const ftp = (pasv: string) =>
+    ({ request: async () => ({ code: 227, message: `227 Entering Passive Mode (${pasv})` }), socket: { remoteAddress: '194.90.26.22' } }) as unknown as Parameters<typeof passiveMode>[0];
+  // Another public host in the PASV answer is refused before any connection is made.
+  await assert.rejects(passiveMode(ftp('8,8,8,8,4,1')), /PASV returned another host/);
 });

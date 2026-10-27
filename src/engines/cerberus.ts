@@ -1,6 +1,8 @@
 import { type PeerCertificate, checkServerIdentity } from 'node:tls';
 import { Writable } from 'node:stream';
-import { Client, enterPassiveModeIPv4 } from 'basic-ftp';
+import { Client } from 'basic-ftp';
+// Not re-exported by the package index; basic-ftp is pinned (package.json), so the path is stable.
+import { enterPassiveModeIPv4_forceControlHostIP } from 'basic-ftp/dist/transfer.js';
 import type { Chain } from '../chains.ts';
 import { type PublishedFile, parseName } from '../files.ts';
 import { limiter } from '../pool.ts';
@@ -18,8 +20,13 @@ import { listingCache, type Session } from './index.ts';
  * domain instead of the host name; anything else is refused.
  *
  * EPSV data connections never open on this server (each attempt waits for the
- * timeout), so transfers go straight to PASV.
+ * timeout), so transfers go straight to PASV. The data connection must go to
+ * the host of the verified control connection: a PASV answer that names
+ * another host is refused (basic-ftp's safe default, which plain
+ * enterPassiveModeIPv4 would turn off).
  */
+export const passiveMode = enterPassiveModeIPv4_forceControlHostIP;
+
 export const HOST = 'url.retail.publishedprices.co.il';
 const DOMAIN = 'publishedprices.co.il';
 
@@ -33,7 +40,7 @@ export function publishedPricesIdentity(host: string, cert: PeerCertificate): Er
 export async function openCerberus(chain: Chain, engine: { user: string; password?: string; path?: string }): Promise<Session> {
   const connect = async () => {
     const client = new Client(120_000);
-    client.prepareTransfer = enterPassiveModeIPv4;
+    client.prepareTransfer = passiveMode;
     await client.access({
       host: HOST,
       user: engine.user,

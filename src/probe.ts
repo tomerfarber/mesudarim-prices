@@ -1,22 +1,28 @@
 import { CHAINS } from './chains.ts';
 import { open } from './engines/index.ts';
-import { newest } from './files.ts';
+import { newest, newestByStore } from './files.ts';
+import { canReach } from './http.ts';
 import { branches, decode, priceItems } from './xml.ts';
 
-/** Checks every chain end to end: its Stores file, then one branch's newest PriceFull. */
+/** Checks every chain end to end: its Stores file, its PriceFull listing, then one branch's newest PriceFull. Needs no server. */
 export async function probe(only?: string): Promise<void> {
   for (const chain of CHAINS.filter((c) => !only || c.id === only)) {
     const t = Date.now();
+    if (chain.relay !== 'none' && !canReach(true)) {
+      console.log(`${chain.id.padEnd(11)} needs_relay (set RELAY_URL, or pass --direct in Israel)`);
+      continue;
+    }
     let session;
     try {
       session = await open(chain);
-      const storesFile = newest(await session.list('stores', null), 'stores', null);
+      const storesFile = newest(await session.list('stores'), 'stores', null);
       const stores = storesFile ? [...branches(decode(await session.fetch(storesFile)))] : [];
-      const all = await session.list('pricefull', null);
-      const file = newest(all, 'pricefull', all.at(-1)?.store ?? null) ?? all[0];
-      const items = file ? [...priceItems(decode(await session.fetch(file)))] : [];
+      const byStore = newestByStore(await session.list('pricefull'));
+      const file = [...byStore.values()].sort((a, b) => b.stamp.localeCompare(a.stamp))[0];
+      const raw = file ? await session.fetch(file) : null;
+      const items = raw ? [...priceItems(decode(raw))] : [];
       console.log(
-        `${chain.id.padEnd(11)} ok  branches=${stores.length} pricefull-files=${all.length} sample=${file?.name ?? '-'} items=${items.length} ${(Date.now() - t) / 1000}s`,
+        `${chain.id.padEnd(11)} ok  branches=${stores.length} pricefull-branches=${byStore.size} sample=${file?.name ?? '-'} bytes=${raw?.length ?? 0} items=${items.length} ${(Date.now() - t) / 1000}s`,
       );
     } catch (e) {
       console.log(`${chain.id.padEnd(11)} FAIL ${(e as Error).message}`);

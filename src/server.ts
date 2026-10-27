@@ -60,9 +60,24 @@ export async function rpc<T>(fn: string, args: Record<string, unknown>): Promise
   });
 }
 
-/** Sends rows in batches, so one request never carries more than `size` rows. */
+/**
+ * Sends rows in batches, so one request never carries more than `size` rows.
+ * A batch that fails (after rpc's retries) does not stop the others; when any
+ * failed, it throws at the end, saying how many and the first error.
+ */
 export async function inBatches<T>(rows: readonly T[], size: number, send: (batch: T[]) => Promise<unknown>): Promise<void> {
-  for (let i = 0; i < rows.length; i += size) await send(rows.slice(i, i + size));
+  let failed = 0;
+  let first: unknown;
+  const total = Math.ceil(rows.length / size);
+  for (let i = 0; i < rows.length; i += size) {
+    try {
+      await send(rows.slice(i, i + size));
+    } catch (e) {
+      failed++;
+      first ??= e;
+    }
+  }
+  if (failed > 0) throw new Error(`${failed} of ${total} batches failed: ${first instanceof Error ? first.message : String(first)}`);
 }
 
 /**

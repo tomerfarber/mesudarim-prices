@@ -24,7 +24,9 @@ import type { PriceItem } from './xml.ts';
  * differs (Yohananof's ItemName is sometimes only the brand, 'עלית', with the
  * product in the description). The other fields come from the chain earliest
  * in CHAINS (Shufersal first, as in the weekly catalog before 0072), the
- * manufacturer from the earliest chain that knows it.
+ * manufacturer from the earliest chain that knows it, '' when none does (the
+ * chains write 'לא ידוע', 'כללי', 'שונות' or '---', and the apps show any
+ * manufacturer that is not empty).
  */
 
 /** A name that may be cut counts as this many characters shorter. */
@@ -50,7 +52,7 @@ export interface ProductSeen {
   item: PriceItem;
   rank: number;
   name: NameCandidate;
-  /** From the chain earliest in CHAINS that knows it ('לא ידוע' and 'כללי' do not count). */
+  /** From the chain earliest in CHAINS that knows it; '' when no chain does. */
   manufacturer: { text: string; known: boolean; rank: number };
   chains: Set<string>;
 }
@@ -58,7 +60,9 @@ export interface ProductSeen {
 const length = (s: string) => [...s].length;
 const HEBREW = /[א-ת]/;
 const PROMO = /^\*\s*מבצע\s*\*\s*/;
-const UNKNOWN_MAKER = new Set(['', 'לא ידוע', 'כללי']);
+const PLACEHOLDER_MAKER = new Set(['לא ידוע', 'כללי', 'שונות']);
+/** A manufacturer with letters that is not a placeholder. */
+const knownMaker = (text: string) => /\p{L}/u.test(text) && !PLACEHOLDER_MAKER.has(text.trim());
 
 /** Spaces collapsed, and Yohananof's '*מבצע*' (on sale) marker dropped: it is not part of the product's name. */
 export function cleanName(raw: string): string {
@@ -124,7 +128,8 @@ export function addChain(catalog: Map<string, ProductSeen>, chainId: string, ran
     if (description && description !== name.text) {
       name = betterName(name, { text: description, cut: isCut(item.description, descriptionWidth), rank, field: 1 });
     }
-    const maker = { text: item.manufacturer, known: !UNKNOWN_MAKER.has(item.manufacturer.trim()), rank };
+    const makerKnown = knownMaker(item.manufacturer);
+    const maker = { text: makerKnown ? item.manufacturer : '', known: makerKnown, rank };
     const known = catalog.get(barcode);
     if (!known) {
       catalog.set(barcode, { item, rank, name, manufacturer: maker, chains: new Set([chainId]) });

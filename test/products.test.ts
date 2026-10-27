@@ -43,7 +43,7 @@ const chains: Record<string, Map<string, PriceItem>> = {
   osher_ad: new Map([
     ...others('11', 20),
     [FELDMAN[0], item(FELDMAN[0], 'מאגדת שלגוני פלדמן 9')],
-    [FELDMAN[1], item(FELDMAN[1], 'מאגדת שלגוני פלדמן 9')],
+    [FELDMAN[1], item(FELDMAN[1], 'מאגדת שלגוני פלדמן 9', { manufacturer: 'לא ידוע' })],
     [FELDMAN[2], item(FELDMAN[2], 'מאגדת שלגוני פלדמן 9')],
     [FELDMAN[3], item(FELDMAN[3], 'מאגדת שלגוני פלדמן 9')],
     [BAMBA, item(BAMBA, 'במבה 80 גרם', { manufacturer: 'לא ידוע' })],
@@ -51,7 +51,7 @@ const chains: Record<string, Map<string, PriceItem>> = {
   shufersal: new Map([
     ...others('22', 24),
     [FELDMAN[0], item(FELDMAN[0], 'חמישיה שלגון ונילש.פיסטו')],
-    [FELDMAN[1], item(FELDMAN[1], 'חמישיה שלגון וניל ש.מריר')],
+    [FELDMAN[1], item(FELDMAN[1], 'חמישיה שלגון וניל ש.מריר', { manufacturer: '---' })],
     [FELDMAN[3], item(FELDMAN[3], 'חמישיה99קל.קרם לימון200ג')],
     [BAMBA, item(BAMBA, 'במבה 80 גרם אסם', { manufacturer: 'אסם', quantity: 80, unit: 'גרם' })],
   ]),
@@ -86,6 +86,8 @@ test('names do not depend on which chain finishes first, and a name cut at 20 ch
   assert.equal(bamba.name, 'במבה קלאסי 80 גרם');
   // The other fields come from the chain earliest in CHAINS (Shufersal), the manufacturer from the first that knows it.
   assert.deepEqual([bamba.manufacturer, bamba.quantity, bamba.unit, bamba.chains], ['אסם', 80, 'גרם', 3]);
+  // No chain knows the Feldman packs' manufacturer: Shufersal's '---' and Osher Ad's 'לא ידוע' go as ''.
+  assert.equal(raceOrder.get(FELDMAN[1])!.manufacturer, '');
 });
 
 test("a chain's cut width is found from its own names", () => {

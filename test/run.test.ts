@@ -188,6 +188,27 @@ test('a run past its time budget stops starting downloads and reports the chain 
   assert.equal(exitCode(report), 1);
 });
 
+test('a product is named the same whichever chain finishes first (2026-10-27: the first chain to finish cut names at 20 characters)', async () => {
+  const slow = (session: Session): Session => ({
+    ...session,
+    fetch: async (file) => {
+      await new Promise((r) => setTimeout(r, 50));
+      return session.fetch(file);
+    },
+  });
+  const bamba = (name: string, price: string) => xmlItems([['7290000066318', name, price]]);
+  const chainsOf: Record<string, Session> = {
+    shufersal: slow(fakeSession({ 'PriceFull7290027600007-001-001-20261027-030000.gz': bamba('במבה 80 גרם אסם', '4.90') })),
+    king_store: fakeSession({ 'PriceFull7290058108879-000-006-20261027-051209.GZ': bamba('במבה 80 גרם', '4.50') }),
+    yohananof: fakeSession({ 'PriceFull7290803800003-000-015-20261027-004052.gz': bamba('במבה 80 ג', '4.70') }),
+  };
+  await prices({ full: true, chains: ['shufersal', 'king_store', 'yohananof'], budgetMs: 60_000, open: async (c) => chainsOf[c.id], localities });
+  const finished = calls.filter((c) => c.fn === 'report_chain_status').map((c) => c.args.p_chain);
+  assert.equal(finished.at(-1), 'shufersal');
+  const rows = calls.find((c) => c.fn === 'ingest_products')!.args.p_rows as { name: string; chains: number }[];
+  assert.deepEqual(rows.map((r) => [r.name, r.chains]), [['במבה 80 גרם אסם', 3]]);
+});
+
 test('price_map_stamps entries are matched by chain and store', () => {
   const parsed = parseStamps({ '7': { chain: 'victory', store: '071', file: '20261027051238', delta: null }, '8': { file: '20261027051238' }, x: {} });
   assert.deepEqual(parsed.byStore.get('victory:71'), { id: 7, file: '20261027051238', delta: null });

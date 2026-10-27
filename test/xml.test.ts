@@ -4,7 +4,7 @@ import { gzipSync } from 'node:zlib';
 import { branches, decode, priceItems } from '../src/xml.ts';
 
 const price = `<?xml version="1.0" encoding="utf-8"?><Root><ChainID>7290058140886</ChainID><Items>
-<Item><ItemCode>7290004131074</ItemCode><ItemName>חלב בקרטון 3% שומן 1 ל</ItemName><ManufactureName>תנובה &amp; שות'</ManufactureName><UnitQty>ליטר</UnitQty><Quantity>1.00</Quantity><bIsWeighted>0</bIsWeighted><ItemPrice>7.20</ItemPrice></Item>
+<Item><ItemCode>7290004131074</ItemCode><ItemName>חלב בקרטון 3% שומן 1 ל</ItemName><ManufactureName>תנובה &amp; שות'</ManufactureName><ManufactureItemDescription>חלב בקרטון 3% שומן 1 ליטר</ManufactureItemDescription><UnitQty>ליטר</UnitQty><Quantity>1.00</Quantity><bIsWeighted>0</bIsWeighted><ItemPrice>7.20</ItemPrice></Item>
 <ITEM><ITEMCODE>0007290000068237</ITEMCODE><ITEMNAME>קוטג</ITEMNAME><ITEMPRICE>6.10</ITEMPRICE><UnitQty>לא ידוע</UnitQty><UnitOfMeasure>100 גרם</UnitOfMeasure></ITEM>
 <Item><ItemCode>123</ItemCode><ItemPrice>1</ItemPrice></Item>
 <Item><ItemCode>7290000000009</ItemCode><ItemPrice>0</ItemPrice></Item>
@@ -13,8 +13,18 @@ const price = `<?xml version="1.0" encoding="utf-8"?><Root><ChainID>729005814088
 test('reads items in any tag case, in agorot, skipping bad rows', () => {
   const items = [...priceItems(price)];
   assert.equal(items.length, 2);
-  assert.deepEqual(items[0], { barcode: '7290004131074', name: 'חלב בקרטון 3% שומן 1 ל', manufacturer: "תנובה & שות'", quantity: 1, unit: 'ליטר', weighted: false, priceAgorot: 720 });
+  assert.deepEqual(items[0], {
+    barcode: '7290004131074',
+    name: 'חלב בקרטון 3% שומן 1 ל',
+    description: 'חלב בקרטון 3% שומן 1 ליטר',
+    manufacturer: "תנובה & שות'",
+    quantity: 1,
+    unit: 'ליטר',
+    weighted: false,
+    priceAgorot: 720,
+  });
   assert.equal(items[1].barcode, '7290000068237');
+  assert.equal(items[1].description, '');
   assert.equal(items[1].unit, '100 גרם');
 });
 

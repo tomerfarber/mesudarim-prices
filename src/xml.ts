@@ -47,7 +47,10 @@ export function* records(xml: string, tags: readonly string[]): Generator<Map<st
 
 export interface PriceItem {
   barcode: string;
+  /** ItemName. Most chains cut it to 20 or 24 characters (products.ts). */
   name: string;
+  /** ManufacturerItemDescription ('' when missing): sometimes the whole name where ItemName is only the brand. */
+  description: string;
   manufacturer: string;
   /** Pack size as published (e.g. 1, 250), with its unit (ליטר, גרם…); null when unknown. */
   quantity: number | null;
@@ -71,6 +74,7 @@ export function* priceItems(xml: string): Generator<PriceItem> {
     yield {
       barcode,
       name: r.get('itemname') ?? r.get('itemnm') ?? '',
+      description: r.get('manufactureitemdescription') ?? r.get('manufactureritemdescription') ?? '',
       manufacturer: r.get('manufacturename') ?? r.get('manufacturername') ?? '',
       quantity: toNumber(r.get('quantity')),
       unit: r.get('unitqty') && r.get('unitqty') !== 'לא ידוע' ? r.get('unitqty')! : (r.get('unitofmeasure') ?? ''),

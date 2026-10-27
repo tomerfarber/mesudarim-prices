@@ -5,6 +5,7 @@ import { NeedsRelay, network, relayState } from './http.ts';
 import { type Localities, buildLocalities, cityName, loadLocalities } from './localities.ts';
 import { type ChainStatus, type Stamp, chainStatus, mergeDeltas, planChain, priceMap } from './plan.ts';
 import { mapLimit } from './pool.ts';
+import { type ProductSeen, addChain, betterSighting, productRows } from './products.ts';
 import { type BranchStamps, inBatches, parseStamps, rpc, server } from './server.ts';
 import { type Branch, type PriceItem, branches, decode } from './xml.ts';
 
@@ -82,11 +83,6 @@ export interface ChainReport {
   seconds?: number;
 }
 
-interface ProductSeen {
-  item: PriceItem;
-  chains: Set<string>;
-}
-
 /** A copy of a string that does not share memory with the text it was cut from. */
 const own = (s: string) => Buffer.from(s, 'utf8').toString('utf8');
 
@@ -134,12 +130,16 @@ async function priceChain(
 
   // Products of this chain, kept apart until the chain is known to be ok. The kept strings are copied:
   // a regex match is a slice that keeps its whole file (~10 MB) alive, and a run reads ~1,000 files.
+  // Branches may name a barcode differently; betterSighting keeps the same one whatever order they finish in.
   const seen = catalog ? new Map<string, PriceItem>() : null;
   const onItem = seen
     ? (item: PriceItem) => {
-        if (isGs1(item.barcode) && item.name && !seen.has(item.barcode)) {
-          seen.set(own(item.barcode), { ...item, barcode: own(item.barcode), name: own(item.name), manufacturer: own(item.manufacturer), unit: own(item.unit) });
-        }
+        if (!isGs1(item.barcode) || !item.name) return;
+        const known = seen.get(item.barcode);
+        if (known && betterSighting(known, item) === known) return;
+        const name = own(item.name);
+        const description = item.description === item.name ? name : own(item.description);
+        seen.set(own(item.barcode), { ...item, barcode: own(item.barcode), name, description, manufacturer: own(item.manufacturer), unit: own(item.unit) });
       }
     : undefined;
 
@@ -325,13 +325,8 @@ async function priceChain(
     runProblems.push(`${chain.id}: ${short}`);
   }
 
-  if (seen && status === 'ok') {
-    for (const [barcode, item] of seen) {
-      const known = catalog!.get(barcode);
-      if (known) known.chains.add(chain.id);
-      else catalog!.set(barcode, { item, chains: new Set([chain.id]) });
-    }
-  }
+  // Names are chosen across chains by a fixed rule (products.ts), not by which chain finished first.
+  if (seen && status === 'ok') addChain(catalog!, chain.id, CHAINS.findIndex((c) => c.id === chain.id), seen);
 
   return {
     status,
@@ -350,20 +345,6 @@ async function priceChain(
     payloadKB: { max: Math.round(maxPayload / 1024), total: Math.round(totalPayload / 1024) },
     seconds: Math.round((Date.now() - started) / 1000),
   };
-}
-
-/** The product rows for ingest_products: per barcode, the chains (that were ok in this run) selling it. */
-export function productRows(catalog: Map<string, ProductSeen>) {
-  return [...catalog].map(([barcode, { item, chains }]) => ({
-    barcode,
-    name: item.name.slice(0, 200),
-    manufacturer: item.manufacturer.slice(0, 120),
-    quantity: item.quantity,
-    unit: item.unit.slice(0, 30),
-    weighted: item.weighted,
-    chains: chains.size,
-    chain_ids: [...chains].sort(),
-  }));
 }
 
 export interface RunReport {

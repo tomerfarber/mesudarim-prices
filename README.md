@@ -37,7 +37,7 @@ The process exits 1 when any chain is `down` or a server call failed, so GitHub 
 
 ## Schedule (`.github/workflows/prices.yml`)
 
-- 02:30 UTC: the full run. Every 2 hours from 04:30 to 20:30 UTC: update runs (newer files only; Victory appears in the first one after ~05:00 Israel time).
+- 02:30 UTC: the full run. Every 3 hours from 05:30 to 20:30 UTC: update runs (newer files only; Victory appears in the first one after ~05:00 Israel time). A dry full run of all 10 chains from Israel took 4.5 minutes: 1,382 maps (largest 469 KB, 142 MB in all), 104,770 products, 695 MB of memory at most.
 - A push to `main` that changes the workflow file runs the downloader once (full).
 - On the 1st of every month a keepalive re-enables the workflow, since GitHub disables the schedule of a public repository after 60 days without activity.
 - Tests and the type check run on every push to `main`.

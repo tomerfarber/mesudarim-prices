@@ -4,9 +4,11 @@ name: prices
 # in the app's repository).
 # - Daily full run (02:30 UTC): branches, every branch's newest PriceFull, and
 #   the product catalog.
-# - Update runs every 2 hours during the day: newer PriceFull and Price
-#   (change) files only, so prices stay fresh. Victory publishes only after
-#   ~05:00 Israel time, so the first update run picks it up.
+# - Update runs every 3 hours during the day (05:30-20:30 UTC): newer
+#   PriceFull and Price (change) files only, so prices stay fresher than the
+#   apps' 6-hour note. Victory publishes only after ~05:00 Israel time, so the
+#   first update run picks it up. Each update rewrites a few hundred branch
+#   maps, so they are not more frequent.
 # - Monthly keepalive: GitHub disables the schedule of a public repository
 #   after 60 days without activity.
 # - A push to main that changes this file runs the downloader once.
@@ -18,7 +20,7 @@ name: prices
 on:
   schedule:
     - cron: '30 2 * * *'
-    - cron: '30 4,6,8,10,12,14,16,18,20 * * *'
+    - cron: '30 5,8,11,14,17,20 * * *'
     - cron: '17 6 1 * *'
   workflow_dispatch:
     inputs:

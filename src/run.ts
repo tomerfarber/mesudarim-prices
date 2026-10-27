@@ -73,6 +73,9 @@ interface ProductSeen {
   chains: Set<string>;
 }
 
+/** A copy of a string that does not share memory with the text it was cut from. */
+const own = (s: string) => Buffer.from(s, 'utf8').toString('utf8');
+
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e)).slice(0, 300);
 
 async function ingestBranches(chain: Chain, session: Session, localities: Localities | null): Promise<{ stores: number; note?: string }> {
@@ -116,9 +119,16 @@ async function priceChain(
   const stampOf = (store: string): Stamp | undefined => stamps.byStore.get(`${chain.id}:${store}`);
   const plans = planChain(fulls, changes, stampOf, { readAll: options.full, priceIsFull: chain.priceIsFull });
 
-  // Products of this chain, kept apart until the chain is known to be ok.
+  // Products of this chain, kept apart until the chain is known to be ok. The kept strings are copied:
+  // a regex match is a slice that keeps its whole file (~10 MB) alive, and a run reads ~1,000 files.
   const seen = catalog ? new Map<string, PriceItem>() : null;
-  const onItem = seen ? (item: PriceItem) => isGs1(item.barcode) && item.name && !seen.has(item.barcode) && seen.set(item.barcode, item) : undefined;
+  const onItem = seen
+    ? (item: PriceItem) => {
+        if (isGs1(item.barcode) && item.name && !seen.has(item.barcode)) {
+          seen.set(own(item.barcode), { ...item, barcode: own(item.barcode), name: own(item.name), manufacturer: own(item.manufacturer), unit: own(item.unit) });
+        }
+      }
+    : undefined;
 
   let tried = 0;
   let failed = 0;
@@ -356,7 +366,7 @@ export async function prices(options: RunOptions): Promise<RunReport> {
       note = `not sent: only ${ok.length} chains were ok`;
     } else {
       try {
-        await inBatches(rows, 2000, async (batch) => {
+        await inBatches(rows, 1000, async (batch) => {
           batches.push(Buffer.byteLength(JSON.stringify(batch)));
           await rpc('ingest_products', { p_rows: batch });
         });

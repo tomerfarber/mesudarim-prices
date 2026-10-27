@@ -5,7 +5,7 @@ import { limiter } from './pool.ts';
  * the app's repository): the anon key plus PRICES_TOKEN, which the RPCs check
  * against app_settings. No service key is needed or kept here. Each call runs
  * under the anon role's 3 s statement timeout, so every payload is one
- * branch's map (≈ 0.1-0.5 MB) or a batch of 2,000 products.
+ * branch's map (≈ 0.1-0.5 MB) or a batch of 1,000 products (≈ 270 KB).
  *
  * In a dry run (`--dry`) nothing is sent: every call is recorded with its
  * size instead, and the answers are empty.

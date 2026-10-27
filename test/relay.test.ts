@@ -3,7 +3,9 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { afterEach, test } from 'node:test';
 import { parse } from 'yaml';
-import { RELAY_HOSTS } from '../src/chains.ts';
+import { RELAY_HOSTS, chainById } from '../src/chains.ts';
+import { openPublishPrice } from '../src/engines/publishprice.ts';
+import { network } from '../src/http.ts';
 
 /** The Lambda's code (CommonJS, as Lambda runs index.js) and the CloudFormation template that carries it inline. */
 const handler = createRequire(import.meta.url)('../relay/index.cjs').handler as (event: unknown) => Promise<{
@@ -19,6 +21,7 @@ const template = parse(readFileSync(new URL('../relay/template.yaml', import.met
 const realFetch = globalThis.fetch;
 afterEach(() => {
   globalThis.fetch = realFetch;
+  network.relay = null;
 });
 
 const call = (url: unknown, method = 'POST') => handler({ requestContext: { http: { method } }, body: JSON.stringify({ url }), isBase64Encoded: false });
@@ -111,4 +114,25 @@ test('only the repository\'s default branch can assume the role, and it may only
   );
   assert.deepEqual(Object.keys(template.Outputs).sort(), ['FunctionUrl', 'RoleArn']);
   assert.equal(template.Resources.RelayLogs.Properties.RetentionInDays, 7);
+});
+
+test('the downloader reads a chain through the relay as the Function URL delivers it (base64 decoded, status kept)', async () => {
+  // Upstream, as seen from Tel Aviv.
+  globalThis.fetch = (async (url: URL) =>
+    String(url).endsWith('/')
+      ? new Response(`<script>const path = '20261027';\nconst files = [{"name":"PriceFull7290055700007-001-002-20261027-051005.gz"}];</script>`)
+      : String(url).includes('?date=')
+        ? new Response(`<script>const path = '20261026';\nconst files = [];</script>`)
+        : new Response(new Uint8Array([0x1f, 0x8b, 9]))) as unknown as typeof fetch;
+  // The Function URL runs the handler and decodes its base64 body.
+  network.relay = {
+    fetch: async (url) => {
+      const res = await handler({ requestContext: { http: { method: 'POST' } }, body: JSON.stringify({ url }) });
+      return new Response(res.isBase64Encoded ? Buffer.from(res.body, 'base64') : res.body, { status: res.statusCode, headers: res.headers });
+    },
+  };
+  const session = await openPublishPrice(chainById('carrefour'), { infix: 'carrefour' });
+  const [file] = await session.list('pricefull');
+  assert.equal(file.source, 'https://prices.carrefour.co.il/20261027/PriceFull7290055700007-001-002-20261027-051005.gz');
+  assert.deepEqual([...(await session.fetch(file))], [0x1f, 0x8b, 9]);
 });

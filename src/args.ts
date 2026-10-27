@@ -1,7 +1,7 @@
 import { CHAINS } from './chains.ts';
 
 /** The command line, checked before anything runs: a typo must not turn into a quiet run of nothing. */
-export const USAGE = 'usage: cli.ts prices [--full] [--dry] [--direct] [--chains a,b] [--out file] [--minutes N] | probe [chain] [--direct]';
+export const USAGE = 'usage: cli.ts prices [--full] [--dry] [--direct] [--chains a,b] [--out file] [--products file] [--minutes N] | probe [chain] [--direct]';
 
 export interface Args {
   command: string;
@@ -10,13 +10,15 @@ export interface Args {
   direct: boolean;
   chains?: string[];
   out?: string;
+  /** The daily run's product rows (the ingest_products payload), written to this file. */
+  products?: string;
   minutes: number;
   /** probe: one chain, or every chain. */
   chain?: string;
 }
 
 const FLAGS = new Set(['--full', '--dry', '--direct']);
-const WITH_VALUE = new Set(['--chains', '--out', '--minutes']);
+const WITH_VALUE = new Set(['--chains', '--out', '--products', '--minutes']);
 
 /** Throws for an unknown flag or chain, a flag without its value, or a --minutes that is not a positive number. */
 export function parseArgs(argv: readonly string[]): Args {
@@ -48,5 +50,5 @@ export function parseArgs(argv: readonly string[]): Args {
   const minutes = Number(minutesText);
   if (!/^\d+(\.\d+)?$/.test(minutesText) || !(minutes > 0)) throw new Error(`--minutes must be a positive number, not ${minutesText}`);
 
-  return { command, full: rest.includes('--full'), dry: rest.includes('--dry'), direct: rest.includes('--direct'), chains, out: values.get('--out'), minutes, chain };
+  return { command, full: rest.includes('--full'), dry: rest.includes('--dry'), direct: rest.includes('--direct'), chains, out: values.get('--out'), products: values.get('--products'), minutes, chain };
 }

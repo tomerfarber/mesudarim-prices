@@ -51,6 +51,8 @@ export interface RunOptions {
   /** How long work already started may run past the budget (default GRACE_MS). */
   graceMs?: number;
   now?: () => Date;
+  /** The daily run's product rows, as sent to ingest_products (also in a dry run): `--products file`. */
+  onProducts?: (rows: ReturnType<typeof productRows>) => void;
   /** Seams for tests: the chains' file servers and the locality list. */
   open?: (chain: Chain) => Promise<Session>;
   localities?: () => Promise<Localities>;
@@ -488,6 +490,7 @@ export async function prices(options: RunOptions): Promise<RunReport> {
   if (catalog) {
     const ok = chains.filter((c) => report.chains[c.id]?.status === 'ok').map((c) => c.id);
     const rows = productRows(catalog);
+    options.onProducts?.(rows);
     const batches: number[] = [];
     let note: string | undefined;
     if (ok.length < 3) {

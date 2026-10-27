@@ -178,8 +178,11 @@ test('an update run sends only what changed, and needs_relay alone does not fail
 
 test('a dry run downloads and builds every payload but calls no RPC', async () => {
   server.dry = true;
-  const report = await prices({ full: true, chains: ['shufersal', 'king_store', 'yohananof'], budgetMs: 60_000, open, localities });
+  let rows: { barcode: string; name: string }[] = [];
+  const report = await prices({ full: true, chains: ['shufersal', 'king_store', 'yohananof'], budgetMs: 60_000, open, localities, onProducts: (r) => (rows = r) });
   assert.deepEqual(calls, []);
+  // --products: the rows ingest_products would get, to check the names before a real run.
+  assert.deepEqual(rows.map((r) => [r.barcode, r.name]).sort(), [['7290000068237', 'קוטג'], ['7290004131074', 'חלב'], ['7290011194246', 'לחם']]);
   assert.equal(report.dry, true);
   // Without the server's stamps every branch's map is built.
   assert.equal(report.chains.shufersal.sent, 2);

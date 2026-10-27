@@ -16,6 +16,7 @@ npm ci
 npm test
 node --experimental-strip-types src/cli.ts probe --direct            # every chain end to end, no server (--direct: run in Israel)
 node --experimental-strip-types src/cli.ts prices --full --dry --direct --out /tmp/dry.json   # a whole run without calling the server
+node --experimental-strip-types src/cli.ts prices --full --dry --direct --chains shufersal,rami_levy --products /tmp/products.json   # also the product rows, to check the names
 ```
 
 ## A run

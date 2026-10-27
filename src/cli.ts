@@ -7,13 +7,14 @@ import { exitCode, prices } from './run.ts';
 import { server } from './server.ts';
 
 /**
- * node --experimental-strip-types src/cli.ts prices [--full] [--dry] [--direct] [--chains a,b] [--out file] [--minutes N]
+ * node --experimental-strip-types src/cli.ts prices [--full] [--dry] [--direct] [--chains a,b] [--out file] [--products file] [--minutes N]
  * node --experimental-strip-types src/cli.ts probe [chain] [--direct]
  *
  * --full     the daily run: branches, every branch's PriceFull, and the product catalog
  * --dry      download and build every payload, but call no server RPC (no secrets needed)
  * --direct   this machine is in Israel: reach Carrefour, Hazi Hinam and Victory without the relay
  * --minutes  stop starting new downloads after N minutes (default 105; the job's timeout is 120)
+ * --products with --full: write the product rows (the ingest_products payload) to this file, to check the names
  *
  * A mistyped chain or flag, or a --minutes that is not a number, exits 2 before anything runs (args.ts).
  */
@@ -35,7 +36,13 @@ async function main(argv: readonly string[]): Promise<number> {
       await probe(args.chain);
       return 0;
     case 'prices': {
-      const report = await prices({ full: args.full, chains: args.chains, budgetMs: args.minutes * 60_000 });
+      const products = args.products;
+      const report = await prices({
+        full: args.full,
+        chains: args.chains,
+        budgetMs: args.minutes * 60_000,
+        onProducts: products ? (rows) => writeFileSync(products, JSON.stringify(rows, null, 1)) : undefined,
+      });
       const out = server.dry ? { ...report, calls: summarizeCalls() } : report;
       console.log(JSON.stringify(out, null, 2));
       if (args.out) writeFileSync(args.out, JSON.stringify(out, null, 2));

@@ -45,7 +45,31 @@ export function newest(files: readonly PublishedFile[], kind: FileKind, store: s
   return best;
 }
 
-/** Today in Israel as YYYYMMDD (the chains name files by Israel time). */
-export function israelDate(at = new Date()): string {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem' }).format(at).replaceAll('-', '');
+/** The newest file of each branch, among files of one kind. */
+export function newestByStore(files: readonly PublishedFile[]): Map<string, PublishedFile> {
+  const best = new Map<string, PublishedFile>();
+  for (const f of files) {
+    if (f.store === null) continue;
+    const known = best.get(f.store);
+    if (!known || f.stamp > known.stamp) best.set(f.store, f);
+  }
+  return best;
 }
+
+const israelParts = (at: Date) =>
+  Object.fromEntries(
+    new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hourCycle: 'h23' })
+      .formatToParts(at)
+      .map((p) => [p.type, p.value]),
+  );
+
+/** A day in Israel as YYYYMMDD (the chains name files by Israel time): today, or `daysAgo` days earlier. */
+export function israelDate(at = new Date(), daysAgo = 0): string {
+  const p = israelParts(at);
+  if (daysAgo === 0) return `${p.year}${p.month}${p.day}`;
+  const day = new Date(Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day) - daysAgo));
+  return day.toISOString().slice(0, 10).replaceAll('-', '');
+}
+
+/** The hour of the day in Israel, 0-23. */
+export const israelHour = (at = new Date()): number => Number(israelParts(at).hour);

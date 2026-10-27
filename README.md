@@ -46,6 +46,16 @@ The process exits 1 when any chain is `down` or the run has a problem: a server 
 - On the 1st of every month a keepalive re-enables the workflow, since GitHub disables the schedule of a public repository after 60 days without activity. That the enable call resets that timer is what other keepalive actions rely on, not something GitHub documents; the database's `prices_stale` alert (no successful run for 30 hours) is the backstop.
 - Tests and the type check run on every push to `main`.
 
+### GitHub starts scheduled runs late (a known limit)
+
+GitHub makes no promise about when a scheduled run starts, and under load it delays or drops them. Measured from `gh run list` (old schedule 04:30, 07:30 and 13:30 UTC, plus Sunday 02:00): from 2026-10-24 to 10-27 every scheduled run started 3.3 to 7 hours late (10-26: 04:30 at 10:22, 07:30 at 14:27, 13:30 at 19:28), and some never started (10-27 13:30; the new 20:30 update had not started by 22:14). So:
+
+- The 03:30 full run will often start mid-morning. It is still the full run when it is late: the run step compares `github.event.schedule` (the cron text), not the clock.
+- The update runs come less often than every 3 hours, so the apps will often show prices older than 6 hours ("מתבסס על המחירים האחרונים…"). The database's `prices_stale` alert (30 hours) catches only a day without any run.
+- Runs never overlap: a run that starts while another is running waits for it (the `prices` concurrency group), and GitHub keeps only the newest waiting run.
+
+Nothing in this repository can make GitHub's scheduler punctual. Starting the runs on time needs a trigger from outside that calls `workflow_dispatch` (`job: full` for the morning run), for example the database's `pg_cron` with `pg_net`, or another scheduler. That needs a GitHub token that may run this workflow, kept as a secret wherever the trigger runs. That choice is the owner's.
+
 ### How fresh the prices are
 
 - A branch's stamp moves only when a newer file is written. Where a chain publishes no change file newer than the morning PriceFull, the update runs find nothing to send, and the branch keeps its PriceFull stamp all day although it was checked (in the dry run at 11:37: 331 of Shufersal's 424 branches, all of Osher Ad's 24). Telling the apps "checked and still current" needs a contract addition (for example a checked time per branch).
